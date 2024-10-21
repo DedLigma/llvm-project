@@ -229,6 +229,11 @@ New checks
   points in a coroutine. Such hostile types include scoped-lockable types and
   types belonging to a configurable denylist.
 
+- New :doc:`misc-pointer-fixed-address
+  <clang-tidy/checks/misc/pointer-fixed-address>` check.
+
+  FIXME: add release notes.
+
 - New :doc:`modernize-use-constraints
   <clang-tidy/checks/modernize/use-constraints>` check.
 
