@@ -21,6 +21,40 @@ using namespace clang::ast_matchers;
 
 namespace clang::tidy::misc {
 
+bool PointerFixedAddressCheck::isPointerAddressFixed(const Expr *RVal) {
+  if (const auto *InitList = llvm::dyn_cast<InitListExpr>(RVal)) {
+    if (InitList->getNumInits() == 1) {
+      RVal = InitList->getInit(0)->IgnoreImpCasts();
+    }
+  } else {
+    RVal = RVal->IgnoreImpCasts();
+  }
+
+  if (isa<CXXNullPtrLiteralExpr>(RVal->IgnoreCasts())) {
+    return false;
+  }
+
+  if (const auto *IntLiteral =
+          llvm::dyn_cast<IntegerLiteral>(RVal->IgnoreCasts())) {
+    if (IntLiteral->getValue() == 0) {
+      return false;
+    }
+  }
+
+  if (!RVal->IgnoreCasts()->getType()->isPointerType() &&
+      RVal->getType()->isPointerType() && RVal->isPRValue() &&
+      !isa<CallExpr>(RVal)) {
+    if (const auto *UnaryOp =
+            llvm::dyn_cast<UnaryOperator>(RVal->IgnoreCasts())) {
+      if (UnaryOp->getOpcode() == UO_AddrOf) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 void PointerFixedAddressCheck::registerMatchers(MatchFinder *Finder) {
   Finder->addMatcher(
       binaryOperator(hasOperatorName("="), hasLHS(hasType(pointerType())))
@@ -38,44 +72,78 @@ void PointerFixedAddressCheck::registerMatchers(MatchFinder *Finder) {
   Finder->addMatcher(
       callExpr(hasArgument(0, hasType(pointerType()))).bind("pointerFuncCall"),
       this);
+
+  Finder->addMatcher(cxxConstructorDecl().bind("pointerConstructorCall"), this);
+
+  Finder->addMatcher(cxxConstructExpr(hasDeclaration(cxxConstructorDecl().bind(
+                                          "pointerConstructorCall")))
+                         .bind("pointerConstructorCall"),
+                     this);
 }
 
 void PointerFixedAddressCheck::check(const MatchFinder::MatchResult &Result) {
+
   const auto *PtrAssignment =
       Result.Nodes.getNodeAs<BinaryOperator>("pointerAssignment");
-
-  const auto *PtrInitialization =
-      Result.Nodes.getNodeAs<VarDecl>("pointerInitialization");
-
-  const auto *PtrDereference =
-      Result.Nodes.getNodeAs<UnaryOperator>("pointerDereference");
-
-  const auto *PtrFuncCall = Result.Nodes.getNodeAs<CallExpr>("pointerFuncCall");
-
   if (PtrAssignment) {
-    const auto *Rval = PtrAssignment->getRHS()->IgnoreImpCasts();
-    if (Rval->getType()->isPointerType() && Rval->isPRValue() &&
-        !isa<CallExpr>(Rval) && !llvm::dyn_cast<UnaryOperator>(Rval)) {
+    const auto *RVal = PtrAssignment->getRHS();
+    if (isPointerAddressFixed(RVal)) {
       diag(PtrAssignment->getExprLoc(), "pointerAssignment",
            DiagnosticIDs::Warning);
     }
   }
+
+  const auto *PtrInitialization =
+      Result.Nodes.getNodeAs<VarDecl>("pointerInitialization");
+  if (PtrInitialization) {
+    const auto *InitVal = PtrInitialization->getInit();
+    if (isPointerAddressFixed(InitVal)) {
+      diag(PtrInitialization->getLocation(), "pointerInitialization",
+           DiagnosticIDs::Warning);
+    }
+  }
+
+  const auto *PtrDereference =
+      Result.Nodes.getNodeAs<UnaryOperator>("pointerDereference");
+  if (PtrDereference) {
+    const auto *InitVal = PtrDereference->getSubExpr();
+    if (isPointerAddressFixed(InitVal)) {
+      diag(PtrDereference->getExprLoc(), "PtrDereference",
+           DiagnosticIDs::Warning);
+    }
+  }
+
+  const auto *PtrFuncCall = Result.Nodes.getNodeAs<CallExpr>("pointerFuncCall");
+  if (PtrFuncCall) {
+    for (const auto *Arg : PtrFuncCall->arguments()) {
+      if (isPointerAddressFixed(Arg)) {
+        diag(Arg->getExprLoc(), "PtrFuncCall", DiagnosticIDs::Warning);
+      }
+    }
+  }
+
+  const auto *ConstructorDecl =
+      Result.Nodes.getNodeAs<CXXConstructorDecl>("pointerConstructorCall");
+  if (ConstructorDecl) {
+    for (const auto *Init : ConstructorDecl->inits()) {
+      const auto *InitExpr = Init->getInit()->IgnoreImpCasts();
+      if (isPointerAddressFixed(InitExpr)) {
+        diag(ConstructorDecl->getLocation(), "pointerInitialization",
+             DiagnosticIDs::Warning);
+      }
+    }
+  }
+
+  const auto *PtrConstructorCall =
+      Result.Nodes.getNodeAs<CXXConstructExpr>("pointerConstructorCall");
+  if (PtrConstructorCall) {
+    for (const auto *Arg : PtrConstructorCall->arguments()) {
+      if (isPointerAddressFixed(Arg)) {
+        diag(PtrConstructorCall->getExprLoc(), "pointerConstructorCall",
+             DiagnosticIDs::Warning);
+      }
+    }
+  }
 }
-
-// if (PtrInitialization) {
-//   diag(PtrInitialization->getLocation(), "pointerInitialization",
-//        DiagnosticIDs::Warning);
-// }
-
-// if (PtrDereference) {
-//   diag(PtrDereference->getExprLoc(), "pointerDereference",
-//        DiagnosticIDs::Warning);
-// }
-
-// if (PtrFuncCall) {
-//   diag(PtrFuncCall->getExprLoc(), "pointerFuncCall",
-//   DiagnosticIDs::Warning);
-// }
-// }
 
 } // namespace clang::tidy::misc

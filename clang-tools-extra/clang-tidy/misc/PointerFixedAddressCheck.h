@@ -13,13 +13,18 @@
 
 namespace clang::tidy::misc {
 
-/// Checker for CWE-587
+/// Finds assignments, initializations, etc. of a fixed address to a pointers
+/// (CWE-587)
 class PointerFixedAddressCheck : public ClangTidyCheck {
 public:
   PointerFixedAddressCheck(StringRef Name, ClangTidyContext *Context)
       : ClangTidyCheck(Name, Context) {}
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
+
+private:
+  /// Function to detect all cases where a pointer can have a fixed address
+  bool isPointerAddressFixed(const Expr *RVal);
 };
 
 } // namespace clang::tidy::misc
