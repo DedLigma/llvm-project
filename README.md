@@ -117,6 +117,16 @@ void Function() {
 }
 ```
 
+## What has been done
+
+After building llvm-project, the new checker was added with this command:
+
+```bash
+./clang-tools-extra/clang-tidy/add_new_check.py misc pointer-fixed-address
+```
+
+That created 2 files in `llvm-project/clang-tools-extra/clang-tidy/misc/` directory - `PointerFixedAddressCheck.cpp` and `PointerFixedAddressCheck.h`. In `PointerFixedAddressCheck.cpp` added logic in `void PointerFixedAddressCheck::registerMatchers(MatchFinder *Finder)` method to match some cases with pointers. After, in `PointerFixedAddressCheck.h` defined private function `bool PointerFixedAddressCheck::isPointerAddressFixed(const Expr *RVal);` to check all expressions with logic in `PointerFixedAddressCheck.cpp`. Further was added logic in `void PointerFixedAddressCheck::check(const MatchFinder::MatchResult &Result)` to check that has been matched and warning, if come of elements is fixed pointer. In the end, was added LIT tests in `llvm-project/clang-tools-extra/test/clang-tidy/checkers/misc/pointer-fixed-address.cpp` file.
+
 ## Examples of checker usage and work
 
 ### Example with functions
