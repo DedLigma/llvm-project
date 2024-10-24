@@ -1,9 +1,11 @@
 // RUN: %check_clang_tidy %s misc-pointer-fixed-address %t
 namespace {
+
+// RUN: %check_clang_tidy %s misc-pointer-fixed-address %t
 int *getPtrFunc() { return (int *)0x1234ABCD; } // CHECK-MESSAGES: :[[@LINE]]:21: warning: The return value of a pointer is a fixed address [misc-pointer-fixed-address]
 
 void setPtrFunc(int *Ptr) { Ptr = (int *)0xABCD1234; } // CHECK-MESSAGES: :[[@LINE]]:35: warning: Operation with pointer with fixed address [misc-pointer-fixed-address]
-
+// RUN: %check_clang_tidy %s misc-pointer-fixed-address %t
 class MyClass {
 public:
   int *Ptr1;
@@ -29,7 +31,7 @@ void Function() {
   Ptr1 = &Num1;
   Ptr1 = (int *)(int *)&Num1;
   Ptr1 = (int *)0x1234ABCD; // CHECK-MESSAGES: :[[@LINE]]:10: warning: Operation with pointer with fixed address [misc-pointer-fixed-address]
-
+  Ptr1 = 5 + (int *)0x0623dcab; // CHECK-MESSAGES: :[[@LINE]]:14: warning: Operation with pointer with fixed address [misc-pointer-fixed-address]
   int *Ptr2{(int *)0x0623dcab}; // CHECK-MESSAGES: :[[@LINE]]:8: warning: Initializing the pointer with the fixed address [misc-pointer-fixed-address]
   int *Ptr3((int *)0x0623dcab); // CHECK-MESSAGES: :[[@LINE]]:8: warning: Initializing the pointer with the fixed address [misc-pointer-fixed-address]
 }
