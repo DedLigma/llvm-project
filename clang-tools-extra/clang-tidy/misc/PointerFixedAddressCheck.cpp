@@ -11,6 +11,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/OperationKinds.h"
+#include "clang/AST/Stmt.h"
 #include "clang/AST/Type.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
@@ -56,18 +57,17 @@ bool PointerFixedAddressCheck::isPointerAddressFixed(const Expr *RVal) {
 }
 
 void PointerFixedAddressCheck::registerMatchers(MatchFinder *Finder) {
-  Finder->addMatcher(
-      binaryOperator(hasOperatorName("="), hasLHS(hasType(pointerType())))
-          .bind("pointerAssignment"),
-      this);
-
   Finder->addMatcher(varDecl(hasType(pointerType()), hasInitializer(expr()))
                          .bind("pointerInitialization"),
                      this);
 
-  Finder->addMatcher(unaryOperator(hasOperatorName("*"), hasType(pointerType()))
-                         .bind("pointerDereference"),
+  Finder->addMatcher(returnStmt(hasReturnValue(expr(hasType(pointerType()))))
+                         .bind("pointerReturn"),
                      this);
+
+  Finder->addMatcher(
+      binaryOperator(anyOf(hasOperatorName("="), hasOperatorName("+"),hasOperatorName("-"), hasOperatorName("*"),hasOperatorName("/"))).bind("pointerOperators"),
+      this);
 
   Finder->addMatcher(
       callExpr(hasArgument(0, hasType(pointerType()))).bind("pointerFuncCall"),
@@ -75,20 +75,26 @@ void PointerFixedAddressCheck::registerMatchers(MatchFinder *Finder) {
 
   Finder->addMatcher(cxxConstructorDecl().bind("pointerConstructorCall"), this);
 
-  Finder->addMatcher(cxxConstructExpr(hasDeclaration(cxxConstructorDecl().bind(
-                                          "pointerConstructorCall")))
+  Finder->addMatcher(cxxConstructExpr(hasDeclaration(cxxConstructorDecl()))
                          .bind("pointerConstructorCall"),
                      this);
+
+  Finder->addMatcher(fieldDecl().bind("pointerFieldInitialization"), this);
 }
 
 void PointerFixedAddressCheck::check(const MatchFinder::MatchResult &Result) {
 
-  const auto *PtrAssignment =
-      Result.Nodes.getNodeAs<BinaryOperator>("pointerAssignment");
-  if (PtrAssignment) {
-    const auto *RVal = PtrAssignment->getRHS();
-    if (isPointerAddressFixed(RVal)) {
-      diag(PtrAssignment->getExprLoc(), "pointerAssignment",
+  const auto *PtrOperators =
+      Result.Nodes.getNodeAs<BinaryOperator>("pointerOperators");
+  if (PtrOperators) {
+    const auto *RVal = PtrOperators->getRHS();
+    const auto *LVal = PtrOperators->getLHS();
+    if (RVal && isPointerAddressFixed(RVal)) {
+      diag(RVal->getBeginLoc(), "Operation with pointer with fixed address",
+           DiagnosticIDs::Warning);
+    }
+    if (LVal && isPointerAddressFixed(LVal)) {
+      diag(LVal->getBeginLoc(), "Operation with pointer with fixed address",
            DiagnosticIDs::Warning);
     }
   }
@@ -97,18 +103,19 @@ void PointerFixedAddressCheck::check(const MatchFinder::MatchResult &Result) {
       Result.Nodes.getNodeAs<VarDecl>("pointerInitialization");
   if (PtrInitialization) {
     const auto *InitVal = PtrInitialization->getInit();
-    if (isPointerAddressFixed(InitVal)) {
-      diag(PtrInitialization->getLocation(), "pointerInitialization",
+    if (InitVal && isPointerAddressFixed(InitVal)) {
+      diag(PtrInitialization->getLocation(),
+           "Initializing the pointer with the fixed address",
            DiagnosticIDs::Warning);
     }
   }
 
-  const auto *PtrDereference =
-      Result.Nodes.getNodeAs<UnaryOperator>("pointerDereference");
-  if (PtrDereference) {
-    const auto *InitVal = PtrDereference->getSubExpr();
-    if (isPointerAddressFixed(InitVal)) {
-      diag(PtrDereference->getExprLoc(), "PtrDereference",
+  const auto *PtrReturn = Result.Nodes.getNodeAs<ReturnStmt>("pointerReturn");
+  if (PtrReturn) {
+    const auto *RetVal = PtrReturn->getRetValue();
+    if (RetVal && isPointerAddressFixed(RetVal)) {
+      diag(PtrReturn->getReturnLoc(),
+           "The return value of a pointer is a fixed address",
            DiagnosticIDs::Warning);
     }
   }
@@ -116,8 +123,10 @@ void PointerFixedAddressCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *PtrFuncCall = Result.Nodes.getNodeAs<CallExpr>("pointerFuncCall");
   if (PtrFuncCall) {
     for (const auto *Arg : PtrFuncCall->arguments()) {
-      if (isPointerAddressFixed(Arg)) {
-        diag(Arg->getExprLoc(), "PtrFuncCall", DiagnosticIDs::Warning);
+      if (Arg && isPointerAddressFixed(Arg)) {
+        diag(Arg->getExprLoc(),
+             "The pointer in the argument has a fixed address",
+             DiagnosticIDs::Warning);
       }
     }
   }
@@ -127,8 +136,9 @@ void PointerFixedAddressCheck::check(const MatchFinder::MatchResult &Result) {
   if (ConstructorDecl) {
     for (const auto *Init : ConstructorDecl->inits()) {
       const auto *InitExpr = Init->getInit()->IgnoreImpCasts();
-      if (isPointerAddressFixed(InitExpr)) {
-        diag(ConstructorDecl->getLocation(), "pointerInitialization",
+      if (InitExpr && isPointerAddressFixed(InitExpr)) {
+        diag(ConstructorDecl->getLocation(),
+             "The initialization list contains a fixed pointer address",
              DiagnosticIDs::Warning);
       }
     }
@@ -138,10 +148,23 @@ void PointerFixedAddressCheck::check(const MatchFinder::MatchResult &Result) {
       Result.Nodes.getNodeAs<CXXConstructExpr>("pointerConstructorCall");
   if (PtrConstructorCall) {
     for (const auto *Arg : PtrConstructorCall->arguments()) {
-      if (isPointerAddressFixed(Arg)) {
-        diag(PtrConstructorCall->getExprLoc(), "pointerConstructorCall",
+      if (Arg && isPointerAddressFixed(Arg)) {
+        diag(PtrConstructorCall->getExprLoc(),
+             "Constructor for class contains a fixed pointer address",
              DiagnosticIDs::Warning);
       }
+    }
+  }
+
+  const auto *PtrFieldInitialization =
+      Result.Nodes.getNodeAs<FieldDecl>("pointerFieldInitialization");
+  if (PtrFieldInitialization) {
+    const auto *InitExpr =
+        PtrFieldInitialization->getInClassInitializer()->IgnoreImpCasts();
+    if (InitExpr && isPointerAddressFixed(InitExpr)) {
+      diag(PtrFieldInitialization->getLocation(),
+           "Field in class has initialization with fixed address",
+           DiagnosticIDs::Warning);
     }
   }
 }
