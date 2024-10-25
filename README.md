@@ -1,4 +1,4 @@
-# LLVM compiler infrastructure
+# Clang-tidy checker CWE-587
 
 ## About
 
